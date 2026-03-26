@@ -1,0 +1,24 @@
+Install Libraries:
+Adafruit_MPR121
+Adafruit_MPU6050
+Adafruit_Sensor
+FastLED
+driver/i2s.h (built-in)
+Wire
+
+Set Up Pin:
+// Audio
+#define AUDIO_BCLK 3
+#define AUDIO_LRC  2
+#define AUDIO_DIN 6
+
+// LED
+#define LED_PIN 9
+#define NUM_LEDS 8
+
+// Vibration
+#define VIB_PIN 7
+
+// MPR121 + MPU6050
+#define SDA_PIN 21
+#define SCL_PIN 22
