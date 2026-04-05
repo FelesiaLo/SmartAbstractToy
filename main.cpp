@@ -1,98 +1,99 @@
-#include <Wire.h>
-#include <Adafruit_MPR121.h>
 #include <FastLED.h>
+#include <driver/i2s.h>
+#include <SPIFFS.h>
+#include <Arduino.h>
+#include "WAVFileReader.h"
+#include "SinWaveGenerator.h"
+#include "I2SOutput.h"
 
-// ===================== PIN CONFIG =====================
-#define SDA_PIN 21
-#define SCL_PIN 22
-
-#define LED_PIN 9
+// ================= LED =================
+#define LED_PIN 18
 #define NUM_LEDS 8
-
-// ===================== OBJECTS =====================
-Adafruit_MPR121 cap = Adafruit_MPR121();
 CRGB leds[NUM_LEDS];
 
-// ===================== BRIGHTNESS CONTROL =====================
-uint8_t brightness = 0;
-uint8_t targetBrightness = 0;
-const uint8_t MAX_BRIGHTNESS = 120; // safe for babies
+// ================= TOUCH =================
+#define TOUCH_PIN 4
+#define THRESHOLD 30
 
-// animation
-int offset = 0;
+// ================= I2S =================
+#define I2S_BCLK 14
+#define I2S_LRC 15
+#define I2S_DOUT 22
+#define SAMPLE_RATE 44100
 
-// ===================== SETUP =====================
-void setup() {
+// ================= GLOBAL AUDIO BUFFER =================
+#define AUDIO_CHUNK 256
+int16_t audioBuffer[AUDIO_CHUNK * 2]; // stereo buffer
+
+i2s_pin_config_t i2sPins = {
+    .bck_io_num = I2S_BCLK,
+    .ws_io_num = I2S_LRC,
+    .data_out_num = I2S_DOUT,
+    .data_in_num = I2S_PIN_NO_CHANGE};
+
+I2SOutput *output;
+SampleSource *sampleSource;
+
+// ================= LED EFFECT =================
+void googleHomeEffect()
+{
+  static uint8_t hue = 0;
+  static float brightnessPhase = 0;
+
+  brightnessPhase += 0.05;
+  float brightness = (sin(brightnessPhase) + 1.0) / 2.0; // 0–1 smooth
+
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    leds[i] = CHSV(hue + i * 10, 200, brightness * 150);
+  }
+
+  hue++;
+  FastLED.show();
+}
+
+// ================= SETUP =================
+void setup()
+{
   Serial.begin(115200);
 
-  Wire.begin(SDA_PIN, SCL_PIN);
-
-  // detect touch sensors
-  if (!cap.begin(0x5A)) {
-    Serial.println("MPR121 not found!");
-    while (1);
-  }
-
   FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
-  FastLED.setBrightness(brightness);
-}
-
-// ===================== LOOP =====================
-void loop() {
-  bool isTouched = readTouch();
-
-  // set target brightness
-  if (isTouched) {
-    targetBrightness = MAX_BRIGHTNESS;
-  } else {
-    targetBrightness = 0;
-  }
-
-  updateBrightness();
-  updateLED();
-
-  delay(20); // smooth animation
-}
-
-// ===================== TOUCH =====================
-bool readTouch() {
-  uint16_t touched = cap.touched();
-
-  bool left  = touched & (1 << 0);
-  bool right = touched & (1 << 1);
-  bool front = touched & (1 << 2);
-  bool back  = touched & (1 << 3);
-
-  return (left || right || front || back);
-}
-
-// ===================== SMOOTH BRIGHTNESS =====================
-void updateBrightness() {
-  if (brightness < targetBrightness) {
-    brightness++;   // fade IN
-  } 
-  else if (brightness > targetBrightness) {
-    brightness--;   // fade OUT (~5 sec)
-  }
-
-  FastLED.setBrightness(brightness);
-}
-
-// ===================== LED =====================
-void updateLED() {
-  offset++;
-
-  // Colors + low saturation
-  for (int i = 0; i < NUM_LEDS; i++) {
-
-    uint8_t hue = (i * 20 + offset) % 255;
-
-    leds[i] = CHSV(
-      hue,        // rainbow movement
-      60,         // low saturation = pastel
-      255         // actual brightness controlled globally
-    );
-  }
-
+  FastLED.clear();
   FastLED.show();
+
+
+  Serial.println("System ready. Touch sensor test...");
+}
+
+// ================= LOOP =================
+void loop()
+{
+  int touchValue = touchRead(TOUCH_PIN);
+
+  if (touchValue < THRESHOLD)
+  {
+    // TOUCHED
+    googleHomeEffect(); // LED animation
+    SPIFFS.begin();
+    sampleSource = new WAVFileReader("/sample.wav");
+
+    Serial.println("Starting I2S Output");
+    output = new I2SOutput();
+    output->start(I2S_NUM_1, i2sPins, sampleSource);
+  }
+  else
+  {
+    // NOT TOUCHED
+    FastLED.clear();
+    FastLED.show();
+
+    // send silence
+    for (int i = 0; i < AUDIO_CHUNK; i++)
+    {
+      audioBuffer[i * 2] = 0;
+      audioBuffer[i * 2 + 1] = 0;
+    }
+
+    delay(20);
+  }
 }
