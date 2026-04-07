@@ -39,12 +39,17 @@ CRGB leds[NUM_LEDS];
 #define I2S_DOUT 25
 #define SAMPLE_RATE 44100
 
-// ================= MELODY =================
-float melody[] = {261.63, 293.66, 329.63, 293.66, 261.63, 220.00};
-int melodyLength = 6;
+// ================= MELODIES =================
+float melodyA[] = {220, 246, 261, 246}; // calm
+float melodyB[] = {330, 349, 392, 349}; // bright
+float melodyC[] = {392, 440, 494, 440}; // playful
+float melodyD[] = {110, 130, 146, 130}; // deep
+
+float *currentMelody = melodyA;
+int melodyLength = 4;
 int melodyIndex = 0;
 unsigned long lastNoteTime = 0;
-float currentFreq = melody[0];
+float currentFreq = 220;
 
 // ================= AUDIO =================
 #define AUDIO_CHUNK 256
@@ -73,25 +78,24 @@ void setupI2S()
   i2s_set_pin(I2S_NUM_0, &pin_config);
 }
 
-// ================= LED EFFECT =================
-void googleHomeEffect()
+// ================= SOUND REACTIVE LED =================
+void soundReactiveLED(float freq)
 {
-  static uint8_t hue = 0;
-  static float brightnessPhase = 0;
+  static float phase = 0;
+  phase += 0.1;
 
-  brightnessPhase += 0.05;
-  float brightness = (sin(brightnessPhase) + 1.0) / 2.0;
+  uint8_t hue = map(freq, 100, 500, 0, 255);
+  uint8_t brightness = (sin(phase) + 1.0) * 127;
 
   for (int i = 0; i < NUM_LEDS; i++)
   {
-    leds[i] = CHSV(hue + i * 10, 200, brightness * 150);
+    leds[i] = CHSV(hue + i * 5, 200, brightness);
   }
 
-  hue++;
   FastLED.show();
 }
 
-// ================= MELODY =================
+// ================= UPDATE MELODY =================
 void updateMelody()
 {
   if (millis() - lastNoteTime > 400)
@@ -99,7 +103,8 @@ void updateMelody()
     melodyIndex++;
     if (melodyIndex >= melodyLength)
       melodyIndex = 0;
-    currentFreq = melody[melodyIndex];
+
+    currentFreq = currentMelody[melodyIndex];
     lastNoteTime = millis();
   }
 }
@@ -136,7 +141,7 @@ void setup()
   Wire.begin(21, 22);
   Wire.setClock(100000);
 
-  // 🔴 Init MPR121
+  // Init MPR121
   writeRegister(0x5E, 0x00);
   for (int i = 0; i < 12; i++)
   {
@@ -155,7 +160,7 @@ void setup()
 
   setupI2S();
 
-  Serial.println("System ready (MPR121)");
+  Serial.println("System ready (Multi-touch melodies)");
 }
 
 // ================= LOOP =================
@@ -163,27 +168,42 @@ void loop()
 {
   uint16_t touch = readTouchStatus();
 
-  // 🎯 Only electrodes 0,3,7,11
+  // 🎯 Select melody based on touch
+  if (touch & (1 << 0))
+  {
+    currentMelody = melodyA;
+  }
+  else if (touch & (1 << 3))
+  {
+    currentMelody = melodyB;
+  }
+  else if (touch & (1 << 7))
+  {
+    currentMelody = melodyC;
+  }
+  else if (touch & (1 << 11))
+  {
+    currentMelody = melodyD;
+  }
+
   bool isTouched =
       (touch & (1 << 0)) ||
       (touch & (1 << 3)) ||
       (touch & (1 << 7)) ||
       (touch & (1 << 11));
 
-  Serial.print("Touch mask: ");
+  Serial.print("Touch: ");
   Serial.println(touch, BIN);
 
   if (isTouched)
   {
-    // TOUCHED
-    googleHomeEffect();
     updateMelody();
+    soundReactiveLED(currentFreq);
     fillAudioBuffer(currentFreq);
     playAudio();
   }
   else
   {
-    // NOT TOUCHED
     FastLED.clear();
     FastLED.show();
 
